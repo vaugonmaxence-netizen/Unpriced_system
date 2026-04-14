@@ -1,0 +1,2 @@
+anthropic>=0.24.0
+node-fetch>=3.3.2
