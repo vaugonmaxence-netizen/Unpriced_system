@@ -265,7 +265,7 @@ async function scan(isLiveRound = false) {
 
   console.log(`[SCAN] ${matches.length} matchs (${matches.filter(m=>m.isLive).length} live)`);
 
-  for (const match of matches.slice(0, isLiveRound ? 6 : 4)) {
+  forfor (const match of matches.slice(0, isLiveRound ? 3 : 3)) {
     const teams = `${match.home_team} vs ${match.away_team}`;
     const key = `${match.id}-${match.sport}-${match.isLive}`;
     if (sentPicks.has(key)) continue;
@@ -278,7 +278,7 @@ async function scan(isLiveRound = false) {
         await sendNotification(result, teams, match.sport);
         setTimeout(() => sentPicks.delete(key), 4 * 60 * 60 * 1000);
       }
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 5000));
     } catch(e) { console.error(`[ERR] ${teams}:`, e.message); }
   }
 }
