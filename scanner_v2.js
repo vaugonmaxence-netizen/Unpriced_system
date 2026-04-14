@@ -1,4 +1,4 @@
- import Anthropic from "@anthropic-ai/sdk";
+import Anthropic from "@anthropic-ai/sdk";
 import fetch from "node-fetch";
 import cron from "node-cron";
 import dotenv from "dotenv";
@@ -8,81 +8,44 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const NTFY_TOPIC = process.env.NTFY_TOPIC || "unpriced-picks";
 const ODDS_API_KEY = process.env.ODDS_API_KEY;
 const EDGE_THRESHOLD = parseFloat(process.env.EDGE_THRESHOLD || "3");
-const MODEL_API_URL = process.env.MODEL_API_URL || "http://localhost:8080";
+
+// Surface par tournoi
+const TOURNAMENT_SURFACES = {
+  barcelona: "Clay", munich: "Clay", madrid: "Clay", rome: "Clay",
+  "monte_carlo": "Clay", "monte-carlo": "Clay", roland: "Clay",
+  estoril: "Clay", houston: "Clay", hamburg: "Clay", geneva: "Clay",
+  lyon: "Clay", bucharest: "Clay", marrakech: "Clay", istanbul: "Clay",
+  challenger: "Clay",
+  wimbledon: "Grass", queens: "Grass", halle: "Grass", eastbourne: "Grass",
+  "s-hertogenbosch": "Grass", nottingham: "Grass",
+};
+
+function getSurface(sportTitle, sportKey) {
+  const text = ((sportTitle || "") + " " + (sportKey || "")).toLowerCase();
+  for (const [keyword, surface] of Object.entries(TOURNAMENT_SURFACES)) {
+    if (text.includes(keyword)) return surface;
+  }
+  return "Hard";
+}
 
 const FOOTBALL_COMPETITIONS = [
-  "soccer_france_ligue_one","soccer_england_league1","soccer_spain_la_liga",
-  "soccer_germany_bundesliga","soccer_italy_serie_a",
-  "soccer_uefa_champs_league","soccer_uefa_europa_league"
-];
-
-const TENNIS_COMPETITIONS = [
-  "tennis_atp_french_open","tennis_atp_us_open","tennis_atp_wimbledon",
-  "tennis_atp_aus_open","tennis_atp_madrid_open","tennis_atp_rome",
-  "tennis_atp_monte_carlo","tennis_atp_canadian_open","tennis_atp_cincinnati",
-  "tennis_wta_french_open"
+  "soccer_france_ligue_one", "soccer_england_league1", "soccer_spain_la_liga",
+  "soccer_germany_bundesliga", "soccer_italy_serie_a",
+  "soccer_uefa_champs_league", "soccer_uefa_europa_league"
 ];
 
 const sentPicks = new Set();
 
-async function callEloModel(playerA, playerB, surface, oddsA, oddsB, tournament, isLive) {
+async function getTennisCompetitions() {
   try {
-    const params = new URLSearchParams({
-      player_a: playerA, player_b: playerB, surface: surface || "Hard",
-      odds_a: oddsA, odds_b: oddsB, tournament: tournament || "",
-      live: isLive ? "true" : "false"
-    });
-    const res = await fetch(`${MODEL_API_URL}/analyze?${params}`, { timeout: 8000 });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch { return null; }
-}
-
-// ── IA ciblée : blessures / fatigue / fraîcheur uniquement ──
-async function checkPhysicalFactors(playerA, playerB, surface, eloEdge) {
-  const prompt = `Tu es un analyste médical tennis EV+. Recherche UNIQUEMENT les infos physiques récentes (14 jours) sur ces deux joueurs.
-
-Match: ${playerA} vs ${playerB} sur ${surface}
-Edge Elo de base: ${eloEdge}%
-
-Recherche pour CHAQUE joueur :
-- Blessure récente ou en cours (cheville, dos, épaule, genou...)
-- Maladie récente
-- Nombre de matchs joués dans les 7 derniers jours
-- Durée totale de jeu sur les 7 derniers jours
-- Déclarations sur leur forme physique en conférence de presse
-- Abandon ou retrait récent
-
-RÈGLES :
-- Si info négative sur le FAVORI Elo → edge augmente
-- Si info négative sur l'OUTSIDER Elo → edge diminue
-- Si aucune info physique trouvée → adjustment 0%
-
-Réponds UNIQUEMENT en JSON :
-{
-  "player_a_status": "FIT/FATIGUE/BLESSE/INCONNU",
-  "player_b_status": "FIT/FATIGUE/BLESSE/INCONNU",
-  "player_a_details": "détails en 1 phrase",
-  "player_b_details": "détails en 1 phrase",
-  "edge_adjustment": X,
-  "adjusted_edge": Y,
-  "key_factor": "facteur physique principal ou AUCUN",
-  "recommendation": "CONFIRME/RENFORCE/REDUIT/ANNULE"
-}`;
-
-  try {
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 600,
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
-      messages: [{ role: "user", content: prompt }]
-    });
-    const text = response.content.map(b => b.type === "text" ? b.text : "").join("\n");
-    const m = text.replace(/```json|```/g,"").trim().match(/\{[\s\S]*\}/);
-    return m ? JSON.parse(m[0]) : null;
+    const res = await fetch(`https://api.the-odds-api.com/v4/sports/?apiKey=${ODDS_API_KEY}&all=false`);
+    const data = await res.json();
+    const comps = data.filter(s => s.key.includes("tennis") && s.active).map(s => s.key);
+    console.log(`[TENNIS COMPS] ${comps.length} tournois actifs: ${comps.join(", ")}`);
+    return comps;
   } catch(e) {
-    console.error("[IA PHYSIQUE]", e.message);
-    return null;
+    console.error("[TENNIS COMPS] Erreur:", e.message);
+    return [];
   }
 }
 
@@ -94,25 +57,16 @@ async function fetchMatches(competitions, inPlay = false) {
       const res = await fetch(url, { timeout: 10000 });
       if (!res.ok) continue;
       const data = await res.json();
-      if (Array.isArray(data)) results.push(...data.map(m => ({ ...m, isLive: inPlay })));
-    } catch {}
+      if (Array.isArray(data) && data.length > 0) {
+        results.push(...data.map(m => ({ ...m, isLive: inPlay })));
+        console.log(`[FETCH] ${comp}: ${data.length} matchs`);
+      }
+    } catch(e) {
+      console.error(`[FETCH ERR] ${comp}:`, e.message);
+    }
   }
   return results;
 }
-
-function parseTennisMatch(match) {
-  const title = (match.sport_title || match.sport_key || "").toLowerCase();
-  let surface = "Hard";
-  if (title.includes("clay") || title.includes("monte") || title.includes("roland") ||
-      title.includes("rome") || title.includes("madrid") || title.includes("barcelona") ||
-      title.includes("estoril") || title.includes("houston") || title.includes("munich") ||
-      title.includes("hamburg") || title.includes("geneva") || title.includes("lyon")) surface = "Clay";
-  else if (title.includes("wimbledon") || title.includes("grass") || title.includes("queens") ||
-           title.includes("halle") || title.includes("eastbourne")) surface = "Grass";
-  console.log(`[SURFACE] ${match.sport_title} → ${surface}`);
-  return { playerA: match.home_team || "", playerB: match.away_team || "", surface };
-}
-
 
 function getBestOdds(match) {
   let bestA = 0, bestB = 0;
@@ -128,73 +82,70 @@ function getBestOdds(match) {
 }
 
 async function analyzeTennisMatch(match) {
-  const { playerA, playerB, surface } = parseTennisMatch(match);
+  const surface = getSurface(match.sport_title, match.sport_key);
+  const playerA = match.home_team || "";
+  const playerB = match.away_team || "";
   const { oddsA, oddsB } = getBestOdds(match);
-  if (!oddsA || !oddsB) return null;
+  const tournament = match.sport_title || "";
+  const isLive = match.isLive || false;
 
-  console.log(`[TENNIS] ${playerA} vs ${playerB} | ${surface} | ${oddsA}/${oddsB}`);
-
-  // ── Étape 1 : Modèle Elo ──
-  const modelResult = await callEloModel(playerA, playerB, surface, oddsA, oddsB,
-    match.sport_title || "", match.isLive || false);
-
-  if (!modelResult?.has_value || !modelResult.value_bets?.length) return null;
-
-  const best = modelResult.value_bets[0];
-  if (best.edge_pct < EDGE_THRESHOLD) return null;
-
-  console.log(`[ELO] Edge détecté: ${best.player} +${best.edge_pct}% — vérification physique...`);
-
-  // ── Étape 2 : IA physique ──
-  const physical = await checkPhysicalFactors(playerA, playerB, surface, best.edge_pct);
-
-  let finalEdge = best.edge_pct;
-  let physicalNote = "";
-  let decision = best.decision;
-
-  if (physical) {
-    finalEdge = physical.adjusted_edge || best.edge_pct;
-    physicalNote = physical.key_factor !== "AUCUN" ? physical.key_factor : "";
-
-    if (physical.recommendation === "ANNULE" || finalEdge < EDGE_THRESHOLD) {
-      console.log(`[IA] ❌ Edge annulé par facteur physique: ${physicalNote}`);
-      return null;
-    }
-    if (physical.recommendation === "REDUIT") {
-      decision = finalEdge >= 4 ? "CORE" : finalEdge >= 2 ? "ACTION" : "SKIP";
-    }
-    console.log(`[IA] ✅ ${physical.recommendation} | ${physicalNote || "Aucun facteur physique majeur"}`);
+  if (!oddsA || !oddsB) {
+    console.log(`[SKIP] ${playerA} vs ${playerB} — pas de cotes`);
+    return null;
   }
 
-  // ── Message final ──
-  const emoji = "🎾";
-  const liveTag = match.isLive ? "🔴 LIVE · " : "";
-  const tournament = match.sport_title || "ATP";
+  console.log(`[TENNIS] ${playerA} vs ${playerB} | ${surface} | ${oddsA}/${oddsB} | ${tournament}`);
 
-  const lines = [
-    `${emoji} ${liveTag}${tournament}`,
-    ``,
-    `${best.player} @ ${best.odds} · ${best.stake_pct}%`,
-    `Value estimée : +${finalEdge}%`,
-    `Proba modèle : ~${best.prob_model_pct}%`,
-    `—`,
-    `Elo ${surface} : ${best.elo_player} vs ${best.elo_opponent}`,
-    physicalNote ? `⚕ Physique : ${physicalNote}` : `⚕ Physique : RAS`,
-    physical ? `Statut : ${playerA} ${physical.player_a_status} · ${playerB} ${physical.player_b_status}` : "",
-    `—`,
-    `Lecture froide. Zéro émotion.`
-  ].filter(l => l !== "");
+  const prompt = `Tu es un analyste EV+ tennis professionnel.
 
-  return {
-    telegram_message: lines.join("\n"),
-    pick: best.player,
-    cote: best.odds,
-    stake: `${best.stake_pct}%`,
-    edge: `${finalEdge}%`,
-    decision,
-    isLive: match.isLive || false,
-    source: "elo+ia"
-  };
+Match: ${playerA} vs ${playerB}
+Surface: ${surface}
+Tournoi: ${tournament}
+Cotes: ${playerA} @ ${oddsA} / ${playerB} @ ${oddsB}
+${isLive ? "MATCH EN LIVE" : "PRÉ-MATCH"}
+
+Recherche les infos récentes sur ces joueurs (fatigue, blessures, forme, confrontations directes sur ${surface}).
+Calcule l'edge estimé vs les cotes du marché.
+
+RÈGLES STRICTES :
+- Edge < ${EDGE_THRESHOLD}% → decision SKIP obligatoire
+- Cote < 1.60 → edge requis ≥ 5%
+- En cas de doute → SKIP
+
+Réponds UNIQUEMENT en JSON valide sans markdown :
+{"has_value":true,"player":"nom exact","odds":2.48,"edge_pct":4.2,"stake_pct":1.0,"decision":"ACTION","confidence":"MEDIUM","reason":"explication courte","telegram_message":"🎾 Munich · R2\\n\\nTsitsipas @ 1.75 · 1%\\nValue estimée : +4.2%\\nProba modèle : ~57%\\n—\\nEdge : surface clay avantage confirmé\\n—\\nLecture froide. Zéro émotion."}`;
+
+  try {
+    console.log(`[IA] Analyse en cours: ${playerA} vs ${playerB}...`);
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 800,
+      tools: [{ type: "web_search_20250305", name: "web_search" }],
+      messages: [{ role: "user", content: prompt }]
+    });
+
+    const text = response.content.map(b => b.type === "text" ? b.text : "").join("\n");
+    console.log(`[IA RAW] ${text.substring(0, 200)}`);
+
+    const clean = text.replace(/```json|```/g, "").trim();
+    const m = clean.match(/\{[\s\S]*\}/);
+    if (!m) {
+      console.log(`[IA] Pas de JSON trouvé pour ${playerA} vs ${playerB}`);
+      return null;
+    }
+
+    const data = JSON.parse(m[0]);
+    console.log(`[IA RESULT] ${playerA} vs ${playerB} → ${data.decision} | Edge: ${data.edge_pct}%`);
+
+    if (data.has_value && data.edge_pct >= EDGE_THRESHOLD) {
+      return { ...data, isLive, source: "ai_tennis" };
+    } else {
+      console.log(`[SKIP] ${playerA} vs ${playerB} — edge insuffisant (${data.edge_pct}%)`);
+    }
+  } catch(e) {
+    console.error(`[IA ERR] ${playerA} vs ${playerB}:`, e.message);
+  }
+  return null;
 }
 
 async function analyzeFootballMatch(match) {
@@ -202,39 +153,41 @@ async function analyzeFootballMatch(match) {
   if (!oddsA || !oddsB) return null;
 
   const prompt = `Tu es un analyste EV+ football. Sois TRÈS sélectif.
-Match: ${match.home_team} vs ${match.away_team} | ${match.sport_title} | Cotes: ${oddsA} / ${oddsB}
-
-Recherche UNIQUEMENT :
-- Blessures joueurs clés (derniers 14 jours)
-- Fatigue (matchs joués cette semaine)
-- Suspensions
-- Forme récente (5 derniers matchs)
-
-Edge minimum: ${EDGE_THRESHOLD + 1}%. Si doute → SKIP.
-
-JSON: {"has_value":false} ou {"has_value":true,"player":"équipe","odds":X.XX,"edge_pct":X.X,"stake_pct":X.X,"decision":"CORE/ACTION","physical_note":"facteur clé","telegram_message":"message complet"}`;
+Match: ${match.home_team} vs ${match.away_team} | ${match.sport_title}
+Cotes: ${match.home_team} @ ${oddsA} / ${match.away_team} @ ${oddsB}
+Edge minimum: ${EDGE_THRESHOLD + 1}%. En cas de doute → SKIP.
+Réponds UNIQUEMENT en JSON valide :
+{"has_value":false,"player":"équipe","odds":2.0,"edge_pct":0,"stake_pct":0,"decision":"SKIP","confidence":"LOW","reason":"","telegram_message":""}`;
 
   try {
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514", max_tokens: 600,
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 600,
       tools: [{ type: "web_search_20250305", name: "web_search" }],
       messages: [{ role: "user", content: prompt }]
     });
     const text = response.content.map(b => b.type === "text" ? b.text : "").join("\n");
-    const m = text.replace(/```json|```/g,"").trim().match(/\{[\s\S]*\}/);
+    const m = text.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/);
     const data = m ? JSON.parse(m[0]) : null;
-    if (data?.has_value && data.edge_pct >= EDGE_THRESHOLD + 1)
+    if (data?.has_value && data.edge_pct >= EDGE_THRESHOLD + 1) {
+      console.log(`[FOOT] ✅ Edge: ${match.home_team} vs ${match.away_team} → ${data.decision} ${data.edge_pct}%`);
       return { ...data, isLive: match.isLive || false, source: "ai_football" };
-  } catch(e) { console.error("[FOOT]", e.message); }
+    }
+  } catch(e) {
+    console.error(`[FOOT ERR]:`, e.message);
+  }
   return null;
 }
 
 async function sendNotification(result, teams, sport) {
   const emoji = sport === "tennis" ? "🎾" : "⚽";
   const liveTag = result.isLive ? "🔴 LIVE — " : "";
-  const title = `${liveTag}UNPRICED ${emoji} ${result.decision} | Edge ${result.edge} | ${teams}`;
+  const title = `${liveTag}UNPRICED ${emoji} ${result.decision} | Edge +${result.edge_pct}% | ${teams}`;
+  const body = result.telegram_message || title;
+
+  console.log(`[NTFY] Envoi: ${title}`);
   try {
-    await fetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
+    const res = await fetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
       method: "POST",
       headers: {
         "Content-Type": "text/plain",
@@ -242,36 +195,29 @@ async function sendNotification(result, teams, sport) {
         Priority: result.decision === "CORE" ? "urgent" : "high",
         Tags: result.isLive ? "red_circle,chart_with_upwards_trend" : "chart_with_upwards_trend"
       },
-      body: result.telegram_message || title
+      body
     });
-    console.log(`[NTFY] ✅ ${teams} | ${result.decision} | ${result.source}`);
-  } catch(e) { console.error("[NTFY]", e.message); }
-}
-// Récupérer tous les sports tennis disponibles dynamiquement
-async function getTennisCompetitions() {
-  try {
-    const res = await fetch(`https://api.the-odds-api.com/v4/sports/?apiKey=${ODDS_API_KEY}&all=true`);
-    const data = await res.json();
-    return data
-      .filter(s => s.key.includes("tennis") && s.active)
-      .map(s => s.key);
-  } catch { return TENNIS_COMPETITIONS; }
+    if (res.ok) console.log(`[NTFY] ✅ Envoyé: ${teams}`);
+    else console.log(`[NTFY] ❌ Erreur HTTP: ${res.status}`);
+  } catch(e) {
+    console.error("[NTFY ERR]:", e.message);
+  }
 }
 
 async function scan(isLiveRound = false) {
   const now = new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris" });
   console.log(`\n[SCAN] ${now} — ${isLiveRound ? "LIVE" : "PRÉ-MATCH"}`);
+
   const matches = [];
 
+  const tennisComps = await getTennisCompetitions();
+  const tennisMatches = await fetchMatches(tennisComps, isLiveRound);
+  matches.push(...tennisMatches.map(m => ({ ...m, sport: "tennis" })));
+
   if (!isLiveRound) {
-   const tennisComps = await getTennisCompetitions();
-const tp = await fetchMatches(tennisComps, false);
-    const fp = await fetchMatches(FOOTBALL_COMPETITIONS, false);
-    matches.push(...tp.map(m => ({ ...m, sport: "tennis" })));
-    matches.push(...fp.map(m => ({ ...m, sport: "football" })));
+    const footMatches = await fetchMatches(FOOTBALL_COMPETITIONS, false);
+    matches.push(...footMatches.map(m => ({ ...m, sport: "football" })));
   }
-  const tl = await fetchMatches(TENNIS_COMPETITIONS, true);
-  matches.push(...tl.map(m => ({ ...m, sport: "tennis" })));
 
   matches.sort((a, b) => {
     if (a.isLive && !b.isLive) return -1;
@@ -279,41 +225,47 @@ const tp = await fetchMatches(tennisComps, false);
     return new Date(a.commence_time) - new Date(b.commence_time);
   });
 
-  console.log(`[SCAN] ${matches.length} matchs (${matches.filter(m=>m.isLive).length} live)`);
+  console.log(`[SCAN] ${matches.length} matchs (${matches.filter(m => m.isLive).length} live)`);
 
-  for (const match of matches.slice(0, isLiveRound ? 3 : 3)) {
+  const toAnalyze = matches.slice(0, 3);
+
+  for (const match of toAnalyze) {
     const teams = `${match.home_team} vs ${match.away_team}`;
-    const key = `${match.id}-${match.sport}-${match.isLive}`;
-    if (sentPicks.has(key)) continue;
+    const key = `${match.id}-${match.sport}`;
+    if (sentPicks.has(key)) {
+      console.log(`[CACHE] Déjà analysé: ${teams}`);
+      continue;
+    }
+
     try {
-      const result = match.sport === "tennis"
-        ? await analyzeTennisMatch(match)
-        : await analyzeFootballMatch(match);
+      let result = null;
+      if (match.sport === "tennis") {
+        result = await analyzeTennisMatch(match);
+      } else {
+        result = await analyzeFootballMatch(match);
+      }
+
       if (result) {
         sentPicks.add(key);
         await sendNotification(result, teams, match.sport);
         setTimeout(() => sentPicks.delete(key), 4 * 60 * 60 * 1000);
       }
-      await new Promise(r => setTimeout(r, 5000));
-    } catch(e) { console.error(`[ERR] ${teams}:`, e.message); }
+
+      await new Promise(r => setTimeout(r, 8000));
+    } catch(e) {
+      console.error(`[ERR] ${teams}:`, e.message);
+    }
   }
 }
 
 console.log("\n🚀 UNPRICED v2 — Elo + IA Physique");
 console.log(`📡 ntfy: ${NTFY_TOPIC}`);
-console.log(`🧮 Model: ${MODEL_API_URL}`);
+console.log(`🧮 Model: http://localhost:8080/`);
 console.log(`⚡ Edge seuil: ${EDGE_THRESHOLD}%`);
 
-fetch(`${MODEL_API_URL}/health`).then(r=>r.json())
-  .then(d => console.log(`[MODEL] ✅ ${d.matches_trained?.toLocaleString()} matchs`))
-  .catch(() => console.log("[MODEL] ⚠ Modèle non connecté"));
-
-// Live tennis : toutes les 10 min
+cron.schedule("*/30 * * * *", () => scan(false));
 cron.schedule("*/10 * * * *", () => scan(true));
-// Pré-match : toutes les heures
-cron.schedule("0 * * * *", () => scan(false));
 
-
-const startupDelay = parseInt(process.env.STARTUP_DELAY || "0") * 1000;
+const startupDelay = parseInt(process.env.STARTUP_DELAY || "30") * 1000;
+console.log(`[INIT] Premier scan dans ${startupDelay/1000}s...`);
 setTimeout(() => scan(false), startupDelay);
-
