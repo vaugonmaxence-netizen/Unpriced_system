@@ -265,7 +265,7 @@ async function scan(isLiveRound = false) {
 
   console.log(`[SCAN] ${matches.length} matchs (${matches.filter(m=>m.isLive).length} live)`);
 
-  forfor (const match of matches.slice(0, isLiveRound ? 3 : 3)) {
+  for (const match of matches.slice(0, isLiveRound ? 3 : 3)) {
     const teams = `${match.home_team} vs ${match.away_team}`;
     const key = `${match.id}-${match.sport}-${match.isLive}`;
     if (sentPicks.has(key)) continue;
