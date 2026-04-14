@@ -308,5 +308,7 @@ cron.schedule("*/10 * * * *", () => scan(true));
 // Pré-match : toutes les heures
 cron.schedule("0 * * * *", () => scan(false));
 
-scan(false);
+
+const startupDelay = parseInt(process.env.STARTUP_DELAY || "0") * 1000;
+setTimeout(() => scan(false), startupDelay);
 
