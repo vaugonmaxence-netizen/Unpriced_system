@@ -104,10 +104,15 @@ function parseTennisMatch(match) {
   const title = (match.sport_title || match.sport_key || "").toLowerCase();
   let surface = "Hard";
   if (title.includes("clay") || title.includes("monte") || title.includes("roland") ||
-      title.includes("rome") || title.includes("madrid")) surface = "Clay";
-  else if (title.includes("wimbledon") || title.includes("grass")) surface = "Grass";
+      title.includes("rome") || title.includes("madrid") || title.includes("barcelona") ||
+      title.includes("estoril") || title.includes("houston") || title.includes("munich") ||
+      title.includes("hamburg") || title.includes("geneva") || title.includes("lyon")) surface = "Clay";
+  else if (title.includes("wimbledon") || title.includes("grass") || title.includes("queens") ||
+           title.includes("halle") || title.includes("eastbourne")) surface = "Grass";
+  console.log(`[SURFACE] ${match.sport_title} → ${surface}`);
   return { playerA: match.home_team || "", playerB: match.away_team || "", surface };
 }
+
 
 function getBestOdds(match) {
   let bestA = 0, bestB = 0;
