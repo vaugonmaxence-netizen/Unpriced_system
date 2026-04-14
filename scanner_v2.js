@@ -242,6 +242,16 @@ async function sendNotification(result, teams, sport) {
     console.log(`[NTFY] ✅ ${teams} | ${result.decision} | ${result.source}`);
   } catch(e) { console.error("[NTFY]", e.message); }
 }
+// Récupérer tous les sports tennis disponibles dynamiquement
+async function getTennisCompetitions() {
+  try {
+    const res = await fetch(`https://api.the-odds-api.com/v4/sports/?apiKey=${ODDS_API_KEY}&all=true`);
+    const data = await res.json();
+    return data
+      .filter(s => s.key.includes("tennis") && s.active)
+      .map(s => s.key);
+  } catch { return TENNIS_COMPETITIONS; }
+}
 
 async function scan(isLiveRound = false) {
   const now = new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris" });
@@ -249,7 +259,8 @@ async function scan(isLiveRound = false) {
   const matches = [];
 
   if (!isLiveRound) {
-    const tp = await fetchMatches(TENNIS_COMPETITIONS, false);
+   const tennisComps = await getTennisCompetitions();
+const tp = await fetchMatches(tennisComps, false);
     const fp = await fetchMatches(FOOTBALL_COMPETITIONS, false);
     matches.push(...tp.map(m => ({ ...m, sport: "tennis" })));
     matches.push(...fp.map(m => ({ ...m, sport: "football" })));
