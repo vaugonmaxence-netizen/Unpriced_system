@@ -1,8 +1,8 @@
 [phases.setup]
-nixPkgs = ["python311", "nodejs_18"]
+nixPkgs = ["python311", "python311Packages.pip", "nodejs_18"]
 
 [phases.install]
-cmds = ["npm i", "pip install requests"]
+cmds = ["npm i", "python3 -m pip install requests"]
 
 [start]
-cmd = "python train.py && python api.py & node scanner_v2.js"
+cmd = "python3 train.py && python3 api.py & node scanner_v2.js"
