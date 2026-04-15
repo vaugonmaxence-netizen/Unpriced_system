@@ -6,9 +6,10 @@ RUN apt-get update && apt-get install -y \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+COPY package.json .
+RUN npm install
 COPY . .
 
 RUN pip3 install anthropic --break-system-packages
-RUN npm install --prefer-offline=false && npm ls @anthropic-ai/sdk
 
-CMD sh -c "python3 train.py && python3 api.py & node scanner_v3.js"
+CMD sh -c "python3 train.py && python3 api.py & sleep 2 && node scanner_v3.js"
