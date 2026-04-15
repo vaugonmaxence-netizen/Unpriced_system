@@ -1,12 +1,17 @@
 {
-  "name": "unpriced-v2",
-  "version": "2.0.0",
+  "name": "unpriced-v3",
+  "version": "3.0.0",
   "type": "module",
-  "scripts": { "start": "node scanner_v2.js" },
+  "scripts": {
+    "start": "node scanner_v3.js"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",
     "node-cron": "^3.0.3",
     "node-fetch": "^3.3.2",
     "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
