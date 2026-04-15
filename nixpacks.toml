@@ -1,8 +1,1 @@
-[phases.setup]
-nixPkgs = ["python311", "python311Packages.pip", "python311Packages.requests", "nodejs_18"]
 
-[phases.install]
-cmds = ["python3.11 -m ensurepip --upgrade && python3.11 -m pip install anthropic", "npm install"]
-
-[start]
-cmd = "python3 train.py && python3 api.py & node scanner_v3.js"
