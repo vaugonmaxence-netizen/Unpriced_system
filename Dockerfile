@@ -9,6 +9,6 @@ WORKDIR /app
 COPY . .
 
 RUN pip3 install anthropic --break-system-packages
-RUN npm install
+RUN npm install --prefer-offline=false && npm ls @anthropic-ai/sdk
 
 CMD sh -c "python3 train.py && python3 api.py & node scanner_v3.js"
