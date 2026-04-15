@@ -3,7 +3,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "python train.py && python api.py & node scanner_v2.js",
+    "startCommand": "python train.py && python api.py & node scanner_v3.js",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
